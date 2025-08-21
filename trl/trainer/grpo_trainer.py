@@ -395,6 +395,54 @@ def truncate_with_protected_tokens(
     return torch.stack(truncated_seq), torch.stack(truncated_mask)
 
 
+def prepare_video_messages_for_vllm(messages):
+    """
+    The frame extraction logic for videos in `vLLM` differs from that of `qwen_vl_utils`.
+    Here, we utilize `qwen_vl_utils` to extract video frames, with the `media_type` of the video explicitly set to `video/jpeg`.
+    By doing so, vLLM will no longer attempt to extract frames from the input base64-encoded images.
+    """
+    from qwen_vl_utils import process_vision_info
+    
+    vllm_messages, fps_list = [], []
+    for message in messages:
+        message_content_list = message["content"] if isinstance(message.get("content"), list) else [message.get("content")]
+        if not message_content_list:
+            vllm_messages.append(message)
+            continue
+
+        new_content_list = []
+        for part_message in message_content_list:
+            if isinstance(part_message, dict) and 'video' in part_message:
+                video_message = [{'content': [part_message]}]
+                image_inputs, video_inputs, video_kwargs = process_vision_info(video_message, return_video_kwargs=True)
+                if video_inputs is not None:
+                    # Convert video tensor to base64 frames
+                    video_input = video_inputs.pop().permute(0, 2, 3, 1).numpy().astype(np.uint8)
+                    fps_list.extend(video_kwargs.get('video_fps', video_kwargs.get('fps', [])))
+
+                    # Encode frames as base64
+                    base64_frames = []
+                    for frame in video_input:
+                        img = Image.fromarray(frame)
+                        output_buffer = BytesIO()
+                        img.save(output_buffer, format="jpeg")
+                        byte_data = output_buffer.getvalue()
+                        base64_str = base64.b64encode(byte_data).decode("utf-8")
+                        base64_frames.append(base64_str)
+
+                    part_message = {
+                        "type": "video_url",
+                        "video_url": {"url": f"data:video/jpeg;base64,{','.join(base64_frames)}"}
+                    }
+            new_content_list.append(part_message)
+        
+        message_copy = message.copy()
+        message_copy["content"] = new_content_list
+        vllm_messages.append(message_copy)
+    
+    return vllm_messages, {'video_fps': fps_list}
+
+
 class GRPOTrainer(Trainer):
     """
     Trainer for the Group Relative Policy Optimization (GRPO) method. This algorithm was initially proposed in the
@@ -1476,6 +1524,10 @@ class GRPOTrainer(Trainer):
                 all_prompts_text = gather_object(prompts_text)
                 if has_images:
                     all_images = gather_object(images)
+                if has_videos:
+                    all_videos = gather_object(videos)
+                    # Prepare video messages for vLLM server mode
+                    all_prompts_for_videos = gather_object(prompts)
 
                 if self.accelerator.is_main_process:
                     # Since 'prompts' contains 'num_generations' duplicates, we first take unique prompts, and generate
@@ -1488,20 +1540,44 @@ class GRPOTrainer(Trainer):
                     else:
                         ordered_set_of_images = None
 
-                    with profiling_context(self, "vLLM.generate"):
-                        completion_ids = self.vllm_client.generate(
-                            prompts=ordered_set_of_prompts,
-                            images=ordered_set_of_images,
-                            n=self.num_generations,
-                            repetition_penalty=self.repetition_penalty,
-                            temperature=self.temperature,
-                            top_p=self.top_p,
-                            top_k=-1 if self.top_k is None else self.top_k,
-                            min_p=0.0 if self.min_p is None else self.min_p,
-                            max_tokens=self.max_completion_length,
-                            guided_decoding_regex=self.guided_decoding_regex,
-                            generation_kwargs=self.args.generation_kwargs,
+                    # Handle video messages for server mode
+                    video_kwargs = {}
+                    if has_videos:
+                        ordered_set_of_prompts_for_videos = all_prompts_for_videos[:: self.num_generations]
+                        prepared_messages, video_kwargs = prepare_video_messages_for_vllm(
+                            [{"content": prompt} for prompt in ordered_set_of_prompts_for_videos]
                         )
+
+                    with profiling_context(self, "vLLM.generate"):
+                        if has_videos:
+                            # Use video-prepared messages with vLLM client
+                            completion_ids = self.vllm_client.generate(
+                                messages=prepared_messages,
+                                n=self.num_generations,
+                                repetition_penalty=self.repetition_penalty,
+                                temperature=self.temperature,
+                                top_p=self.top_p,
+                                top_k=-1 if self.top_k is None else self.top_k,
+                                min_p=0.0 if self.min_p is None else self.min_p,
+                                max_tokens=self.max_completion_length,
+                                guided_decoding_regex=self.guided_decoding_regex,
+                                generation_kwargs=self.args.generation_kwargs,
+                                extra_body={"mm_processor_kwargs": video_kwargs},
+                            )
+                        else:
+                            completion_ids = self.vllm_client.generate(
+                                prompts=ordered_set_of_prompts,
+                                images=ordered_set_of_images,
+                                n=self.num_generations,
+                                repetition_penalty=self.repetition_penalty,
+                                temperature=self.temperature,
+                                top_p=self.top_p,
+                                top_k=-1 if self.top_k is None else self.top_k,
+                                min_p=0.0 if self.min_p is None else self.min_p,
+                                max_tokens=self.max_completion_length,
+                                guided_decoding_regex=self.guided_decoding_regex,
+                                generation_kwargs=self.args.generation_kwargs,
+                            )
                 else:
                     completion_ids = [None] * len(all_prompts_text)
                 # Broadcast the completions from the main process to all processes, ensuring each process receives its
@@ -1548,11 +1624,44 @@ class GRPOTrainer(Trainer):
                         all_images = [img for sublist in gathered_images for img in sublist]
                     else:
                         all_images = None
+                    
+                    if has_videos:
+                        gathered_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
+                        torch.distributed.all_gather_object(gathered_videos, videos, group=self.tp_group)
+                        all_videos = [vid for sublist in gathered_videos for vid in sublist]
+                    else:
+                        all_videos = None
                 else:
                     all_prompts_text = prompts_text
                     all_images = images if has_images else None
+                    all_videos = videos if has_videos else None
 
-                if has_images and all_images:
+                # Prepare vLLM inputs based on available modalities
+                if has_videos and all_videos:
+                    vllm_inputs = []
+                    mm_data = {}
+                    video_kwargs = {}
+                    
+                    for i, (prompt, video) in enumerate(zip(all_prompts_text, all_videos)):
+                        if video is not None:
+                            # Process video using qwen_vl_utils
+                            video_message = [{'content': [{"type": "video", "video": video}]}]
+                            image_inputs, video_inputs, video_kwargs_item = process_vision_info(video_message, return_video_kwargs=True)
+                            
+                            mm_data = {}
+                            if image_inputs is not None:
+                                mm_data["image"] = image_inputs
+                            if video_inputs is not None:
+                                mm_data["video"] = video_inputs
+                            
+                            vllm_inputs.append({
+                                "prompt": prompt, 
+                                "multi_modal_data": mm_data,
+                                "mm_processor_kwargs": video_kwargs_item,
+                            })
+                        else:
+                            vllm_inputs.append(prompt)
+                elif has_images and all_images:
                     vllm_inputs = []
                     for prompt, image in zip(all_prompts_text, all_images):
                         if image is not None:
