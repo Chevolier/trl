@@ -187,6 +187,9 @@ If you want to contribute to `trl` or customize it to your needs make sure to re
 ```bash
 git clone https://github.com/huggingface/trl.git
 cd trl/
+
+conda create -p /home/ec2-user/SageMaker/efs/conda_envs/trl python=3.10 -y
+
 pip install -e .[dev]
 ```
 
