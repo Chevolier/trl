@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import copy
 import inspect
 import os
@@ -22,8 +23,12 @@ from collections import defaultdict, deque
 from collections.abc import Sequence, Sized
 from contextlib import nullcontext
 from functools import partial
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
+
+import numpy as np
+from PIL import Image
 
 import datasets
 import torch
@@ -1361,8 +1366,47 @@ class GRPOTrainer(Trainer):
                                 message["content"] = [{"type": "image"}, {"type": "text", "text": content}]
                             elif role == "system":
                                 message["content"] = [{"type": "text", "text": content}]
+        
+        has_videos = "video" in inputs[0]
+        fps = 1
+        max_frames = 16
+        # min_pixels = 4 * 28 * 28,
+        # max_pixels = 256 * 28 * 28,
+        # total_pixels = 20480 * 28 * 28
+
+        if has_videos:
+            videos = [example.get("video") for example in inputs]
+            # kwargs = {"videos": [[video] for video in videos]}
+            for prompt, video in zip(prompts, videos):
+                if isinstance(prompt, list):
+                    for message in prompt:
+                        if not isinstance(message, dict):
+                            continue
+                        content = message.get("content")
+                        role = message.get("role")
+                        if isinstance(content, str):
+                            if role == "user":
+                                message["content"] = [{"type": "video", "video": video, "fps": fps, "max_frames": max_frames}, {"type": "text", "text": content}]
+                            elif role == "system":
+                                message["content"] = [{"type": "text", "text": content}]
+        
+        print(f"prompts: {len(prompts)}, prompt[0]: {prompt[0]}")
+        
+        # text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+        # inputs = processor(text=text, images=images, videos=videos, padding=True, return_tensors="pt", **video_kwargs)
 
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
+
+        print(f"prompts_text: {prompts_text}")
+        print(f"self.processing_class: {self.processing_class}")
+
+        images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
+        print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
+        
+        kwargs['images'] = images
+        kwargs['videos'] = videos
+        kwargs['video_kwargs'] = video_kwargs
 
         prompt_inputs = self.processing_class(
             text=prompts_text,
@@ -1372,7 +1416,10 @@ class GRPOTrainer(Trainer):
             add_special_tokens=False,
             **kwargs,
         )
+
+        print(f"prompt_inputs0: {prompt_inputs}")
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
+        print(f"prompt_inputs1: {prompt_inputs}")
         prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
         if self.max_prompt_length is not None:
