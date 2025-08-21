@@ -1671,6 +1671,7 @@ class GRPOTrainer(Trainer):
                 else:
                     vllm_inputs = all_prompts_text
 
+                print(f"vllm_inputs: {vllm_inputs}")
                 with profiling_context(self, "vLLM.generate"):
                     all_outputs = self.llm.generate(vllm_inputs, sampling_params=sampling_params, use_tqdm=False)
 
@@ -1687,6 +1688,8 @@ class GRPOTrainer(Trainer):
             completion_ids = [torch.tensor(ids, device=device) for ids in completion_ids]
             completion_ids = pad(completion_ids, padding_value=self.pad_token_id)
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+            print(f"prompt_completion_ids: {prompt_completion_ids}")
+            print(f"completion_ids: {completion_ids}")
 
         elif self.use_transformers_paged:
             # Re-process inputs for paged generation if needed

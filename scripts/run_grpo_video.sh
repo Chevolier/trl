@@ -20,7 +20,7 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --torch_dtype bfloat16 \
     --max_prompt_length 16384 \
     --max_completion_length 512 \
-    --per_device_train_batch_size 4 \
+    --per_device_train_batch_size 2 \
     --beta 0.1 \
     --temperature 0.8 \
     --top_p 0.9 \

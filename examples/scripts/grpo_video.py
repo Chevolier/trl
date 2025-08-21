@@ -339,7 +339,12 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
                 
                 if not conversations or not videos:
                     continue
-                    
+                
+                print(f"videos before: {videos}")
+                for video in videos:
+                    video = os.path.join(data_dir, video)
+                
+                print(f"videos after: {videos}")
                 # Extract messages with compatibility for different formats
                 system_msg = "You are a helpful assistant."
                 human_msg = None

@@ -192,6 +192,8 @@ conda create -p /home/ec2-user/SageMaker/efs/conda_envs/trl python=3.10 -y
 
 pip install -e .[dev]
 pip install qwen-vl-utils[decord]
+
+nohup bash scripts/run_grpo_video.sh >logs/train.out 2>&1 &
 ```
 
 ## Citation
