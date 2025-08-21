@@ -304,20 +304,20 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
         "kids_videos.json"
     ]
     
-    # Automatically discover all JSON files in the data directory
-    import glob
-    json_pattern = os.path.join(data_dir, "*.json")
-    json_file_paths = glob.glob(json_pattern)
+    # # Automatically discover all JSON files in the data directory
+    # import glob
+    # json_pattern = os.path.join(data_dir, "*.json")
+    # json_file_paths = glob.glob(json_pattern)
     
-    # Extract just the filenames from full paths
-    json_files = [os.path.basename(path) for path in json_file_paths]
+    # # Extract just the filenames from full paths
+    # json_files = [os.path.basename(path) for path in json_file_paths]
     
-    # Sort for consistent order
-    json_files.sort()
+    # # Sort for consistent order
+    # json_files.sort()
     
-    print(f"Found {len(json_files)} JSON files in {os.path.abspath(data_dir)}:")
-    for json_file in json_files:
-        print(f"  - {json_file}")
+    # print(f"Found {len(json_files)} JSON files in {os.path.abspath(data_dir)}:")
+    # for json_file in json_files:
+    #     print(f"  - {json_file}")
     
     for json_file in json_files:
         file_path = os.path.join(data_dir, json_file)
@@ -340,11 +340,10 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
                 if not conversations or not videos:
                     continue
                 
-                print(f"videos before: {videos}")
-                for video in videos:
+                for i, video in enumerate(videos):
                     video = os.path.join(data_dir, video)
-                
-                print(f"videos after: {videos}")
+                    videos[i] = video
+
                 # Extract messages with compatibility for different formats
                 system_msg = "You are a helpful assistant."
                 human_msg = None
@@ -430,13 +429,16 @@ if __name__ == "__main__":
         exit(1)
     
     # Print first sample for debugging
-    print(f"First sample has {len(dataset[0]['images'])} images")
+    # print(f"First sample has {len(dataset[0]['video'])} videos")
     print(f"Prompt: {dataset[0]['prompt'][0]['content'][:100]}...")
 
-    dataset = dataset.train_test_split(test_size=100, seed=42)
+    dataset = dataset.train_test_split(test_size=10, seed=42)
     
     train_dataset = dataset["train"]
     eval_dataset = dataset["test"] if training_args.eval_strategy != "no" else None
+
+    print(f"train_dataset: {len(train_dataset)}, {train_dataset[0]}")
+    # print(f"eval_dataset: {len(eval_dataset)}, {eval_dataset[0]}")
 
     ################
     # Training

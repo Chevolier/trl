@@ -192,6 +192,9 @@ conda create -p /home/ec2-user/SageMaker/efs/conda_envs/trl python=3.10 -y
 
 pip install -e .[dev]
 pip install qwen-vl-utils[decord]
+pip install sentence-transformers
+pip install nltk
+pip install flash-attn --no-build-isolation
 
 nohup bash scripts/run_grpo_video.sh >logs/train.out 2>&1 &
 ```

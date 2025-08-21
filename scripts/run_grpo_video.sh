@@ -10,7 +10,7 @@ export WANDB_MODE="online"  # or "offline" for local logging only
 export WANDB_API_KEY="0d32276b8b4b08bb83ecd160d941dba83b3b4975"
 
 deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
-    --deepspeed examples/accelerate_configs/deepspeed_zero3.yaml \
+    --deepspeed configs/ds_z3_config.json \
     --model_name_or_path /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct \
     --output_dir ./checkpoints \
     --data_dir /home/ec2-user/SageMaker/efs/Projects/vlm-rl-training/data/video \
