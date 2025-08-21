@@ -68,6 +68,8 @@ from .utils import (
     selective_log_softmax,
 )
 
+from qwen_vl_utils import process_vision_info
+
 
 if is_peft_available():
     from peft import PeftConfig, PeftModel

@@ -292,17 +292,17 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
     
     # Original hardcoded list (kept for reference)
     # json_files = [
-    #     "0_30_eufy_videos_preprocessed_fixed.json",
-    #     "12_actionData_videos_preprocessed_fixed.json", 
-    #     "kids_videos_preprocessed_fixed.json",
-    #     "smarthome_preprocessed_fixed.json",
-    #     "videos_val_oops_preprocessed_fixed.json"
+    #     "0_30_eufy_videos.json",
+    #     "12_actionData_videos.json", 
+    #     "kids_videos.json",
+    #     "smarthome_videos.json",
+    #     "videos_val_oops.json"
     # ]
 
     # Alternative: single file for testing
-    # json_files = [
-    #     "kids_videos_preprocessed_fixed.json"
-    # ]
+    json_files = [
+        "kids_videos.json"
+    ]
     
     # Automatically discover all JSON files in the data directory
     import glob
@@ -340,22 +340,6 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
                 if not conversations or not videos:
                     continue
                     
-                video_frames = videos[0] if videos else []
-                if not video_frames:
-                    continue
-                
-                # Load frame images
-                images = []
-                for frame_path in video_frames:
-                    try:
-                        img = Image.open(os.path.join(data_dir, frame_path)).convert("RGB")
-                        images.append(img)
-                    except:
-                        continue
-                
-                if len(images) == 0:
-                    continue
-                
                 # Extract messages with compatibility for different formats
                 system_msg = "You are a helpful assistant."
                 human_msg = None
@@ -372,7 +356,7 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
                 
                 if human_msg and assistant_msg:
                     dataset_data.append({
-                        "images": images,
+                        "video": videos[0],  # now only support 1 video
                         "prompt": [
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": human_msg}
@@ -435,7 +419,7 @@ if __name__ == "__main__":
     ################
     dataset = load_multiple_datasets(custom_args.data_dir, max_samples_per_dataset=custom_args.max_samples_per_dataset)
     print(f"Loaded {len(dataset)} video samples from all datasets")
-    
+
     if len(dataset) == 0:
         print("ERROR: No valid samples loaded! Check annotation file and frame paths.")
         exit(1)
@@ -443,9 +427,11 @@ if __name__ == "__main__":
     # Print first sample for debugging
     print(f"First sample has {len(dataset[0]['images'])} images")
     print(f"Prompt: {dataset[0]['prompt'][0]['content'][:100]}...")
+
+    dataset = dataset.train_test_split(test_size=100, seed=42)
     
-    train_dataset = dataset
-    eval_dataset = None
+    train_dataset = dataset["train"]
+    eval_dataset = dataset["test"] if training_args.eval_strategy != "no" else None
 
     ################
     # Training
@@ -455,7 +441,7 @@ if __name__ == "__main__":
         args=training_args,
         reward_funcs=[composite_reward],
         train_dataset=train_dataset,
-        eval_dataset=None,
+        eval_dataset=eval_dataset,
         peft_config=None,  # No PEFT for full parameter training
     )
     

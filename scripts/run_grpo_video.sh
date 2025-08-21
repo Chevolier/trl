@@ -13,7 +13,7 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --deepspeed examples/accelerate_configs/deepspeed_zero3.yaml \
     --model_name_or_path /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct \
     --output_dir ./checkpoints \
-    --data_dir /home/ec2-user/SageMaker/efs/Projects/vlm-rl-training/data/ \
+    --data_dir /home/ec2-user/SageMaker/efs/Projects/vlm-rl-training/data/video \
     --max_samples_per_dataset 3000 \
     --do_train \
     --learning_rate 1e-6 \
