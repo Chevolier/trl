@@ -295,7 +295,7 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
         "0_30_eufy_videos.json",
         "12_actionData_videos.json", 
         "kids_videos.json",
-        "smarthome_videos.json",
+        "smarthome_videos_2.json",
         "videos_val_oops.json"
     ]
 
