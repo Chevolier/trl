@@ -35,8 +35,9 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --overwrite_output_dir true \
     --bf16 true \
     --ddp_timeout 3600000 \
-    --eval_strategy no \
-    --max_steps 5000 \
+    --eval_strategy steps \
+    --eval_steps 200 \
+    --max_steps 1000 \
     --use_vllm \
     --vllm_mode colocate \
     --attn_implementation flash_attention_2 \

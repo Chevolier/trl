@@ -194,7 +194,10 @@ pip install -e .[dev]
 pip install qwen-vl-utils[decord]
 pip install sentence-transformers
 pip install nltk
-pip install flash-attn --no-build-isolation
+pip install wandb
+pip install vllm
+pip install uv
+uv pip install flash-attn --no-build-isolation
 
 nohup bash scripts/run_grpo_video.sh >logs/train.out 2>&1 &
 ```

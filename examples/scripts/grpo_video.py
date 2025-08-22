@@ -291,18 +291,18 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
     all_data = []
     
     # Original hardcoded list (kept for reference)
-    # json_files = [
-    #     "0_30_eufy_videos.json",
-    #     "12_actionData_videos.json", 
-    #     "kids_videos.json",
-    #     "smarthome_videos.json",
-    #     "videos_val_oops.json"
-    # ]
+    json_files = [
+        "0_30_eufy_videos.json",
+        "12_actionData_videos.json", 
+        "kids_videos.json",
+        "smarthome_videos.json",
+        "videos_val_oops.json"
+    ]
 
     # Alternative: single file for testing
-    json_files = [
-        "kids_videos.json"
-    ]
+    # json_files = [
+    #     "kids_videos.json"
+    # ]
     
     # # Automatically discover all JSON files in the data directory
     # import glob
@@ -432,7 +432,7 @@ if __name__ == "__main__":
     # print(f"First sample has {len(dataset[0]['video'])} videos")
     print(f"Prompt: {dataset[0]['prompt'][0]['content'][:100]}...")
 
-    dataset = dataset.train_test_split(test_size=10, seed=42)
+    dataset = dataset.train_test_split(test_size=500, seed=42)
     
     train_dataset = dataset["train"]
     eval_dataset = dataset["test"] if training_args.eval_strategy != "no" else None

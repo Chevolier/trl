@@ -627,6 +627,8 @@ class GRPOTrainer(Trainer):
         self.eos_token_id = tokenizer.eos_token_id
         self.image_token = getattr(processing_class, "image_token", None)
         self.image_token_id = getattr(processing_class, "image_token_id", None)
+        self.video_token = getattr(processing_class, "video_token", None)
+        self.video_token_id = getattr(processing_class, "video_token_id", None)
         self.vision_start_token_id = getattr(model.config, "vision_start_token_id", None)
         self.vision_end_token_id = getattr(model.config, "vision_end_token_id", None)
 
@@ -1424,6 +1426,8 @@ class GRPOTrainer(Trainer):
 
         if has_videos:
             videos = [example.get("video") for example in inputs]
+            # Store original video paths for vLLM processing (before they get processed into tensors)
+            original_video_paths = videos.copy()
             # kwargs = {"videos": [[video] for video in videos]}
             for prompt, video in zip(prompts, videos):
                 if isinstance(prompt, list):
@@ -1437,8 +1441,10 @@ class GRPOTrainer(Trainer):
                                 message["content"] = [{"type": "video", "video": video, "fps": fps, "max_frames": max_frames}, {"type": "text", "text": content}]
                             elif role == "system":
                                 message["content"] = [{"type": "text", "text": content}]
+        else:
+            original_video_paths = None
         
-        print(f"prompts: {len(prompts)}, prompt[0]: {prompt[0]}")
+        # print(f"prompts: {len(prompts)}, prompt[0]: {prompts[0]}")
         
         # text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
@@ -1446,11 +1452,10 @@ class GRPOTrainer(Trainer):
 
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
 
-        print(f"prompts_text: {prompts_text}")
-        print(f"self.processing_class: {self.processing_class}")
+        # print(f"self.processing_class: {self.processing_class}")
 
         images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
-        print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
+        # print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
         
         kwargs['images'] = images
         kwargs['videos'] = videos
@@ -1465,16 +1470,14 @@ class GRPOTrainer(Trainer):
             **kwargs,
         )
 
-        print(f"prompt_inputs0: {prompt_inputs}")
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
-        print(f"prompt_inputs1: {prompt_inputs}")
         prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
         if self.max_prompt_length is not None:
             # If max_prompt_length is set, we trim the prompt to keep only the last `max_prompt_length` tokens.
             # Then we decode those tokens back into text. We manually remove leading pad tokens from the decoded text,
             # because we can't use `skip_special_tokens=True` (some special tokens are still needed for generation).
-            protected = [self.image_token_id, self.vision_start_token_id, self.vision_end_token_id]
+            protected = [self.image_token_id, self.video_token_id, self.vision_start_token_id, self.vision_end_token_id]
             protected = [token for token in protected if token is not None]
             prompt_ids, prompt_mask = truncate_with_protected_tokens(
                 prompt_ids, prompt_mask, self.max_prompt_length, protected
@@ -1511,6 +1514,27 @@ class GRPOTrainer(Trainer):
                     else:
                         # If vision_end_token_id is None, just remove the image tokens
                         prompts_text = [re.sub(rf"({escaped_img_token})+", "", text) for text in prompts_text]
+
+            # Similar processing for video tokens
+            if self.video_token is not None:
+                escaped_vid_token = re.escape(self.video_token)
+                # Search for the video token in the chat template
+                if re.search(escaped_vid_token, self.processing_class.chat_template):
+                    prompts_text = [
+                        re.sub(rf"({escaped_vid_token})+", self.video_token, text) for text in prompts_text
+                    ]
+                else:
+                    # If the chat template doesn't use the video token, we remove all instances of it + vision_end_token_id
+                    if self.vision_end_token_id is not None:
+                        escaped_eoi_token = re.escape(
+                            self.processing_class.tokenizer.decode([self.vision_end_token_id])
+                        )
+                        prompts_text = [
+                            re.sub(rf"({escaped_vid_token})+{escaped_eoi_token}", "", text) for text in prompts_text
+                        ]
+                    else:
+                        # If vision_end_token_id is None, just remove the video tokens
+                        prompts_text = [re.sub(rf"({escaped_vid_token})+", "", text) for text in prompts_text]
 
         # Generate completions using either vLLM or regular generation
         if self.use_vllm:
@@ -1627,26 +1651,31 @@ class GRPOTrainer(Trainer):
                     
                     if has_videos:
                         gathered_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
-                        torch.distributed.all_gather_object(gathered_videos, videos, group=self.tp_group)
+                        torch.distributed.all_gather_object(gathered_videos, original_video_paths, group=self.tp_group)
                         all_videos = [vid for sublist in gathered_videos for vid in sublist]
                     else:
                         all_videos = None
                 else:
                     all_prompts_text = prompts_text
                     all_images = images if has_images else None
-                    all_videos = videos if has_videos else None
+                    all_videos = original_video_paths if has_videos else None
 
                 # Prepare vLLM inputs based on available modalities
                 if has_videos and all_videos:
                     vllm_inputs = []
-                    mm_data = {}
-                    video_kwargs = {}
                     
-                    for i, (prompt, video) in enumerate(zip(all_prompts_text, all_videos)):
-                        if video is not None:
-                            # Process video using qwen_vl_utils
-                            video_message = [{'content': [{"type": "video", "video": video}]}]
-                            image_inputs, video_inputs, video_kwargs_item = process_vision_info(video_message, return_video_kwargs=True)
+                    # Get the original prompts (messages) for vLLM processing
+                    if self.vllm_tensor_parallel_size > 1:
+                        gathered_prompts_msgs = [None for _ in range(self.vllm_tensor_parallel_size)]
+                        torch.distributed.all_gather_object(gathered_prompts_msgs, prompts, group=self.tp_group)
+                        all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
+                    else:
+                        all_prompts_msgs = prompts
+                    
+                    for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
+                        if video_path is not None and prompt_msgs is not None:
+                            # Process video using qwen_vl_utils following official vLLM guide
+                            image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
                             
                             mm_data = {}
                             if image_inputs is not None:
@@ -1655,12 +1684,12 @@ class GRPOTrainer(Trainer):
                                 mm_data["video"] = video_inputs
                             
                             vllm_inputs.append({
-                                "prompt": prompt, 
+                                "prompt": prompt_text,
                                 "multi_modal_data": mm_data,
-                                "mm_processor_kwargs": video_kwargs_item,
+                                "mm_processor_kwargs": video_kwargs,
                             })
                         else:
-                            vllm_inputs.append(prompt)
+                            vllm_inputs.append(prompt_text)
                 elif has_images and all_images:
                     vllm_inputs = []
                     for prompt, image in zip(all_prompts_text, all_images):
@@ -1671,7 +1700,7 @@ class GRPOTrainer(Trainer):
                 else:
                     vllm_inputs = all_prompts_text
 
-                print(f"vllm_inputs: {vllm_inputs}")
+                # print(f"vllm_inputs: len {len(vllm_inputs)}, multimodal video: {len(vllm_inputs[0]['multi_modal_data']['video'])}, {vllm_inputs[0]['multi_modal_data']['video'][0].shape}, {vllm_inputs}")
                 with profiling_context(self, "vLLM.generate"):
                     all_outputs = self.llm.generate(vllm_inputs, sampling_params=sampling_params, use_tqdm=False)
 
@@ -1688,8 +1717,13 @@ class GRPOTrainer(Trainer):
             completion_ids = [torch.tensor(ids, device=device) for ids in completion_ids]
             completion_ids = pad(completion_ids, padding_value=self.pad_token_id)
             prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-            print(f"prompt_completion_ids: {prompt_completion_ids}")
-            print(f"completion_ids: {completion_ids}")
+            # print(f"prompt_completion_ids: {prompt_completion_ids.shape}, {prompt_completion_ids}")
+            # print(f"completion_ids: {completion_ids.shape}, {completion_ids}")
+
+            # prompt_completion_text = self.processing_class.batch_decode(
+            #     prompt_completion_ids, skip_special_tokens=False, clean_up_tokenization_spaces=False
+            # )
+            # print(f"prompt_completion_text: {prompt_completion_text}")
 
         elif self.use_transformers_paged:
             # Re-process inputs for paged generation if needed
