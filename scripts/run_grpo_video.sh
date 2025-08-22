@@ -45,4 +45,9 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --run_name "grpo-qwen-7b-$(date +%Y%m%d-%H%M%S)" \
     --log_completions \
     --dataloader_num_workers 4 \
-    --dataloader_prefetch_factor 8
+    --dataloader_prefetch_factor 8 \
+    --video_fps 1 \
+    --video_max_frames 16 \
+    # --video_min_pixels 3136 \
+    # --video_max_pixels 200704 \
+    # --video_total_pixels 15728640

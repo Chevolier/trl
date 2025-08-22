@@ -408,6 +408,12 @@ if __name__ == "__main__":
     custom_parser = argparse.ArgumentParser()
     custom_parser.add_argument("--data_dir", type=str, default="./data", help="Directory containing training data")
     custom_parser.add_argument("--max_samples_per_dataset", type=int, default=3000, help="Maximum samples per dataset")
+    # Video processing parameters
+    custom_parser.add_argument("--video_fps", type=int, default=1, help="FPS for video processing")
+    custom_parser.add_argument("--video_max_frames", type=int, default=16, help="Maximum frames per video")
+    custom_parser.add_argument("--video_min_pixels", type=int, default=4 * 28 * 28, help="Minimum pixels for video processing")
+    custom_parser.add_argument("--video_max_pixels", type=int, default=256 * 28 * 28, help="Maximum pixels for video processing")
+    custom_parser.add_argument("--video_total_pixels", type=int, default=20480 * 28 * 28, help="Total pixels for video processing")
     custom_args, remaining_args = custom_parser.parse_known_args()
     
     # Parse TRL arguments
@@ -427,6 +433,9 @@ if __name__ == "__main__":
             print(f"  {key}: {value}")
     print("\n[Model Arguments]")
     for key, value in vars(model_args).items():
+        print(f"  {key}: {value}")
+    print("\n[Custom Arguments (Video & Data)]")
+    for key, value in vars(custom_args).items():
         print(f"  {key}: {value}")
     print("=" * 50)
     
@@ -472,6 +481,12 @@ if __name__ == "__main__":
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=None,  # No PEFT for full parameter training
+        # Video processing parameters
+        video_fps=custom_args.video_fps,
+        video_max_frames=custom_args.video_max_frames,
+        video_min_pixels=custom_args.video_min_pixels,
+        video_max_pixels=custom_args.video_max_pixels,
+        video_total_pixels=custom_args.video_total_pixels,
     )
     
     # Freeze vision tower after trainer initialization

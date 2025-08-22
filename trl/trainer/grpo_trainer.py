@@ -561,6 +561,12 @@ class GRPOTrainer(Trainer):
         callbacks: Optional[list[TrainerCallback]] = None,
         optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
         peft_config: Optional["PeftConfig"] = None,
+        # Video processing parameters
+        video_fps: int = 1,
+        video_max_frames: int = 16,
+        video_min_pixels: int = 4 * 28 * 28,
+        video_max_pixels: int = 256 * 28 * 28,
+        video_total_pixels: int = 20480 * 28 * 28,
     ):
         # Args
         if args is None:
@@ -810,6 +816,13 @@ class GRPOTrainer(Trainer):
             "rewards": defaultdict(lambda: deque(maxlen=args.generation_batch_size)),
             "advantages": deque(maxlen=args.generation_batch_size),
         }
+
+        # Video processing parameters
+        self.video_fps = video_fps
+        self.video_max_frames = video_max_frames
+        self.video_min_pixels = video_min_pixels
+        self.video_max_pixels = video_max_pixels
+        self.video_total_pixels = video_total_pixels
 
         # Ensure each process receives a unique seed to prevent duplicate completions when generating with
         # transformers if num_generations exceeds per_device_train_batch_size. We could skip it if we use vLLM, but
@@ -1420,11 +1433,11 @@ class GRPOTrainer(Trainer):
                                 message["content"] = [{"type": "text", "text": content}]
         
         has_videos = "video" in inputs[0]
-        fps = 1
-        max_frames = 16
-        # min_pixels = 4 * 28 * 28,
-        # max_pixels = 256 * 28 * 28,
-        # total_pixels = 20480 * 28 * 28
+        fps = self.video_fps
+        max_frames = self.video_max_frames
+        # min_pixels = self.video_min_pixels,
+        # max_pixels = self.video_max_pixels,
+        # total_pixels = self.video_total_pixels
 
         if has_videos:
             videos = [example.get("video") for example in inputs]
