@@ -986,6 +986,8 @@ class GRPOTrainer(Trainer):
 
             dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
 
+        print(f"dataloader_params: {dataloader_params}")
+
         return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
 
     def _get_train_sampler(self, dataset: Optional[Dataset] = None) -> Sampler:

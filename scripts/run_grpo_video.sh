@@ -36,11 +36,13 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --bf16 true \
     --ddp_timeout 3600000 \
     --eval_strategy steps \
-    --eval_steps 200 \
+    --eval_steps 5 \
     --max_steps 1000 \
     --use_vllm \
     --vllm_mode colocate \
     --attn_implementation flash_attention_2 \
     --report_to wandb \
     --run_name "grpo-qwen-7b-$(date +%Y%m%d-%H%M%S)" \
-    --log_completions
+    --log_completions \
+    --dataloader_num_workers 4 \
+    --dataloader_prefetch_factor 2
