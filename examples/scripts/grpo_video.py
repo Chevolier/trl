@@ -11,11 +11,18 @@ import os
 # os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_OFFLINE"] = "0"
 os.environ["TRANSFORMERS_OFFLINE"] = "0"
+# Suppress HEVC SPS error messages while keeping other errors visible
 import json
+import subprocess
 import torch
 from PIL import Image
 from datasets import Dataset
 from pathlib import Path
+
+# Import decord early to set log level
+import decord
+# Suppress HEVC SPS warning messages (set to QUIET level)
+decord.logging.set_level(decord.logging.QUIET)
 
 from trl import (
     GRPOConfig,
@@ -331,18 +338,33 @@ def load_multiple_datasets(data_dir="./data", max_samples_per_dataset=3000):
             annotations = json.load(f)
         
         dataset_data = []
+        print(f"  Processing {len(annotations[:max_samples_per_dataset])} items...")
         for i, item in enumerate(annotations[:max_samples_per_dataset]):
             try:
                 # Handle different data structures
                 conversations = item.get('conversations', [])
                 videos = item.get('videos', [])
                 
+                if i < 3:  # Debug first 3 items
+                    print(f"    Item {i}: conversations={len(conversations)}, videos={videos}")
+                
                 if not conversations or not videos:
+                    if i < 3:
+                        print(f"    Skipping item {i}: missing conversations or videos")
                     continue
                 
-                for i, video in enumerate(videos):
-                    video = os.path.join(data_dir, video)
-                    videos[i] = video
+                # Video validation - only check existence
+                valid_videos = []
+                for video in videos:
+                    video_path = os.path.join(data_dir, video)
+                    if os.path.exists(video_path):
+                        valid_videos.append(video_path)
+                    else:
+                        print(f"Warning: Video file not found {video_path}")
+                
+                if not valid_videos:
+                    continue
+                videos = valid_videos
 
                 # Extract messages with compatibility for different formats
                 system_msg = "You are a helpful assistant."
