@@ -811,6 +811,7 @@ class GRPOTrainer(Trainer):
         # Keep logs sized to the generation batch to record only outputs from the latest model update.
         self._logs = {
             "image": deque(maxlen=args.generation_batch_size),
+            "video": deque(maxlen=args.generation_batch_size),
             "prompt": deque(maxlen=args.generation_batch_size),
             "completion": deque(maxlen=args.generation_batch_size),
             "rewards": defaultdict(lambda: deque(maxlen=args.generation_batch_size)),
@@ -1034,7 +1035,7 @@ class GRPOTrainer(Trainer):
             data_source=dataset,
             mini_repeat_count=self.num_generations,
             batch_size=self.args.generation_batch_size // self.num_generations,
-            repeat_count=self.num_iterations * self.args.steps_per_generation,
+            repeat_count=self.num_iterations * self.args.steps_per_generation,  # comment: why here * self.args.steps_per_generation?
             shuffle=self.shuffle_dataset,
             seed=self.args.seed,
         )
@@ -1435,9 +1436,9 @@ class GRPOTrainer(Trainer):
         has_videos = "video" in inputs[0]
         fps = self.video_fps
         max_frames = self.video_max_frames
-        # min_pixels = self.video_min_pixels,
-        # max_pixels = self.video_max_pixels,
-        # total_pixels = self.video_total_pixels
+        min_pixels = self.video_min_pixels,
+        max_pixels = self.video_max_pixels,
+        total_pixels = self.video_total_pixels
 
         if has_videos:
             videos = [example.get("video") for example in inputs]
@@ -1468,8 +1469,9 @@ class GRPOTrainer(Trainer):
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
 
         # print(f"self.processing_class: {self.processing_class}")
+        with profiling_context(self, "LLM.process_vision_info"):
+            images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
 
-        images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
         # print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
         
         kwargs['images'] = images
@@ -1668,74 +1670,66 @@ class GRPOTrainer(Trainer):
                         gathered_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
                         torch.distributed.all_gather_object(gathered_videos, original_video_paths, group=self.tp_group)
                         all_videos = [vid for sublist in gathered_videos for vid in sublist]
+                        # Also gather processed video tensors for reuse
+                        gathered_processed_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
+                        torch.distributed.all_gather_object(gathered_processed_videos, videos, group=self.tp_group)
+                        all_processed_videos = [vid for sublist in gathered_processed_videos for vid in sublist]
                     else:
                         all_videos = None
+                        all_processed_videos = None
                 else:
                     all_prompts_text = prompts_text
                     all_images = images if has_images else None
                     all_videos = original_video_paths if has_videos else None
+                    # Store processed video tensors for reuse
+                    all_processed_videos = videos if has_videos else None
 
                 # Prepare vLLM inputs based on available modalities
-                if has_videos and all_videos:
-                    vllm_inputs = []
-                    
-                    # Get the original prompts (messages) for vLLM processing
-                    if self.vllm_tensor_parallel_size > 1:
-                        gathered_prompts_msgs = [None for _ in range(self.vllm_tensor_parallel_size)]
-                        torch.distributed.all_gather_object(gathered_prompts_msgs, prompts, group=self.tp_group)
-                        all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
-                    else:
-                        all_prompts_msgs = prompts
-                    
-                    for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
-                        if video_path is not None and prompt_msgs is not None:
-                            try:
-                                # Suppress ffmpeg/video processing errors
-                                import os
-                                original_stderr = os.dup(2)
-                                with open(os.devnull, 'w') as devnull:
-                                    os.dup2(devnull.fileno(), 2)
+                with profiling_context(self, "vLLM.video_gathering"):
+                    if has_videos and all_videos:
+                        vllm_inputs = []
+                        
+                        # Get the original prompts (messages) for vLLM processing
+                        if self.vllm_tensor_parallel_size > 1:
+                            gathered_prompts_msgs = [None for _ in range(self.vllm_tensor_parallel_size)]
+                            torch.distributed.all_gather_object(gathered_prompts_msgs, prompts, group=self.tp_group)
+                            all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
+                        else:
+                            all_prompts_msgs = prompts
+                        # Reuse results from the first process_vision_info call to avoid redundant processing
+                        for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
+                            if video_path is not None and prompt_msgs is not None:
+                                # Use pre-computed results instead of calling process_vision_info again
+                                mm_data = {}
+                                if all_images is not None and i < len(all_images) and all_images[i] is not None:
+                                    mm_data["image"] = all_images[i]
+                                if all_processed_videos is not None and i < len(all_processed_videos) and all_processed_videos[i] is not None:
+                                    mm_data["video"] = all_processed_videos[i]
                                 
-                                # Process video using qwen_vl_utils following official vLLM guide
-                                image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
+                                # Extract individual video kwargs - use single FPS value for each video
+                                individual_video_kwargs = {}
+                                if 'video_fps' in video_kwargs and video_kwargs['video_fps']:
+                                    # Use the FPS for this specific video index, or default FPS if index out of range
+                                    fps_list = video_kwargs['video_fps']
+                                    individual_fps = fps_list[i] if i < len(fps_list) else self.video_fps
+                                    individual_video_kwargs['video_fps'] = individual_fps
                                 
-                                # Restore stderr
-                                os.dup2(original_stderr, 2)
-                                os.close(original_stderr)
-                            except Exception as e:
-                                # Restore stderr in case of exception
-                                try:
-                                    os.dup2(original_stderr, 2)
-                                    os.close(original_stderr)
-                                except:
-                                    pass
-                                print(f"Warning: Skipping corrupted video {os.path.basename(video_path)}")
-                                # Skip this video and use text-only input
+                                vllm_inputs.append({
+                                    "prompt": prompt_text,
+                                    "multi_modal_data": mm_data,
+                                    "mm_processor_kwargs": individual_video_kwargs,
+                                })
+                            else:
                                 vllm_inputs.append(prompt_text)
-                                continue
-                            
-                            mm_data = {}
-                            if image_inputs is not None:
-                                mm_data["image"] = image_inputs
-                            if video_inputs is not None:
-                                mm_data["video"] = video_inputs
-                            
-                            vllm_inputs.append({
-                                "prompt": prompt_text,
-                                "multi_modal_data": mm_data,
-                                "mm_processor_kwargs": video_kwargs,
-                            })
-                        else:
-                            vllm_inputs.append(prompt_text)
-                elif has_images and all_images:
-                    vllm_inputs = []
-                    for prompt, image in zip(all_prompts_text, all_images):
-                        if image is not None:
-                            vllm_inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
-                        else:
-                            vllm_inputs.append(prompt)
-                else:
-                    vllm_inputs = all_prompts_text
+                    elif has_images and all_images:
+                        vllm_inputs = []
+                        for prompt, image in zip(all_prompts_text, all_images):
+                            if image is not None:
+                                vllm_inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
+                            else:
+                                vllm_inputs.append(prompt)
+                    else:
+                        vllm_inputs = all_prompts_text
 
                 # print(f"vllm_inputs: len {len(vllm_inputs)}, multimodal video: {len(vllm_inputs[0]['multi_modal_data']['video'])}, {vllm_inputs[0]['multi_modal_data']['video'][0].shape}, {vllm_inputs}")
                 with profiling_context(self, "vLLM.generate"):
@@ -1972,6 +1966,8 @@ class GRPOTrainer(Trainer):
 
         if has_images:
             self._logs["image"].extend(gather_object(images))
+        if has_videos:
+            self._logs["video"].extend(gather_object(original_video_paths))
 
         output = {
             "prompt_ids": prompt_ids,
@@ -2214,6 +2210,15 @@ class GRPOTrainer(Trainer):
                             table["image"].append(wandb.Image(img))
                         else:
                             table["image"].append(None)
+
+                if self._logs["video"]:
+                    table["video"] = []
+                    for video in self._logs["video"]:
+                        if video is not None:
+                            # Store video paths directly
+                            table["video"].append(video)
+                        else:
+                            table["video"].append(None)
 
                 df = pd.DataFrame(table)
                 if self.wandb_log_unique_prompts:

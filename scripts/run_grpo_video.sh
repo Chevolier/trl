@@ -3,9 +3,10 @@ export PYTHONWARNINGS="ignore::UserWarning"
 export HF_HUB_OFFLINE=1
 export VLLM_LOGGING_LEVEL=WARNING
 
+RUN_NAME="qwen2.5-vl-7bi-$(date +%Y%m%d-%H%M%S)"
 # Wandb configuration
 export WANDB_PROJECT="vlm-grpo-training"
-export WANDB_RUN_NAME="grpo-qwen-7b-$(date +%Y%m%d-%H%M%S)"
+export WANDB_RUN_NAME=$RUN_NAME
 export WANDB_ENTITY=""  # Your wandb username/team (optional)
 export WANDB_MODE="online"  # or "offline" for local logging only
 export WANDB_API_KEY="your-wandb-api-key"
@@ -13,7 +14,7 @@ export WANDB_API_KEY="your-wandb-api-key"
 deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --deepspeed configs/ds_z3_config.json \
     --model_name_or_path /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct \
-    --output_dir ./checkpoints \
+    --output_dir ./checkpoints/$RUN_NAME \
     --data_dir /home/ec2-user/SageMaker/efs/Projects/vlm-rl-training/data/video \
     --max_samples_per_dataset 3000 \
     --do_train \
