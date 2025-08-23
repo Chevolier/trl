@@ -5,6 +5,10 @@ import logging
 warnings.filterwarnings("ignore")
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("transformers.modeling_utils").setLevel(logging.ERROR)
+# Suppress vLLM INFO messages
+logging.getLogger("vllm").setLevel(logging.WARNING)
+logging.getLogger("vllm.engine").setLevel(logging.WARNING)
+logging.getLogger("vllm.worker").setLevel(logging.WARNING)
 
 import os
 # os.environ["HF_HUB_OFFLINE"] = "1"  # 避免HuggingFace API限流
@@ -420,24 +424,25 @@ if __name__ == "__main__":
     parser = TrlParser((ScriptArguments, GRPOConfig, ModelConfig))
     script_args, training_args, model_args = parser.parse_args_and_config(remaining_args)
     
-    # Print all configuration parameters
-    print("=" * 50)
-    print("CONFIGURATION PARAMETERS")
-    print("=" * 50)
-    print("\n[Script Arguments]")
-    for key, value in vars(script_args).items():
-        print(f"  {key}: {value}")
-    print("\n[Training Arguments]")
-    for key, value in vars(training_args).items():
-        if not key.startswith('_'):
+    # Print all configuration parameters (only on rank 0)
+    if training_args.local_rank in [-1, 0]:
+        print("=" * 50)
+        print("CONFIGURATION PARAMETERS")
+        print("=" * 50)
+        print("\n[Script Arguments]")
+        for key, value in vars(script_args).items():
             print(f"  {key}: {value}")
-    print("\n[Model Arguments]")
-    for key, value in vars(model_args).items():
-        print(f"  {key}: {value}")
-    print("\n[Custom Arguments (Video & Data)]")
-    for key, value in vars(custom_args).items():
-        print(f"  {key}: {value}")
-    print("=" * 50)
+        print("\n[Training Arguments]")
+        for key, value in vars(training_args).items():
+            if not key.startswith('_'):
+                print(f"  {key}: {value}")
+        print("\n[Model Arguments]")
+        for key, value in vars(model_args).items():
+            print(f"  {key}: {value}")
+        print("\n[Custom Arguments (Video & Data)]")
+        for key, value in vars(custom_args).items():
+            print(f"  {key}: {value}")
+        print("=" * 50)
     
     ################
     # Model & Processor
