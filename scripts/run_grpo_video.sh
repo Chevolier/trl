@@ -8,7 +8,7 @@ export WANDB_PROJECT="vlm-grpo-training"
 export WANDB_RUN_NAME="grpo-qwen-7b-$(date +%Y%m%d-%H%M%S)"
 export WANDB_ENTITY=""  # Your wandb username/team (optional)
 export WANDB_MODE="online"  # or "offline" for local logging only
-export WANDB_API_KEY="0d32276b8b4b08bb83ecd160d941dba83b3b4975"
+export WANDB_API_KEY="your-wandb-api-key"
 
 deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --deepspeed configs/ds_z3_config.json \
