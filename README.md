@@ -42,7 +42,7 @@ TRL is a cutting-edge library designed for post-training foundation models using
 
 ## Installation
 
-### Python Package
+<!-- ### Python Package
 
 Install the library using `pip`:
 
@@ -182,7 +182,7 @@ Read more about CLI in the [relevant documentation section](https://huggingface.
 
 ## Development
 
-If you want to contribute to `trl` or customize it to your needs make sure to read the [contribution guide](https://github.com/huggingface/trl/blob/main/CONTRIBUTING.md) and make sure you make a dev install:
+If you want to contribute to `trl` or customize it to your needs make sure to read the [contribution guide](https://github.com/huggingface/trl/blob/main/CONTRIBUTING.md) and make sure you make a dev install: -->
 
 ```bash
 git clone https://github.com/huggingface/trl.git
