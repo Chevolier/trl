@@ -1972,6 +1972,8 @@ class GRPOTrainer(Trainer):
 
         if has_images:
             self._logs["image"].extend(gather_object(images))
+        if has_videos:
+            self._logs["video"].extend(gather_object(original_video_paths))
 
         output = {
             "prompt_ids": prompt_ids,
@@ -2214,6 +2216,15 @@ class GRPOTrainer(Trainer):
                             table["image"].append(wandb.Image(img))
                         else:
                             table["image"].append(None)
+
+                if self._logs["video"]:
+                    table["video"] = []
+                    for video in self._logs["video"]:
+                        if video is not None:
+                            # Store video paths directly
+                            table["video"].append(video)
+                        else:
+                            table["video"].append(None)
 
                 df = pd.DataFrame(table)
                 if self.wandb_log_unique_prompts:
