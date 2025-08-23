@@ -811,6 +811,7 @@ class GRPOTrainer(Trainer):
         # Keep logs sized to the generation batch to record only outputs from the latest model update.
         self._logs = {
             "image": deque(maxlen=args.generation_batch_size),
+            "video": deque(maxlen=args.generation_batch_size),
             "prompt": deque(maxlen=args.generation_batch_size),
             "completion": deque(maxlen=args.generation_batch_size),
             "rewards": defaultdict(lambda: deque(maxlen=args.generation_batch_size)),
@@ -1034,7 +1035,7 @@ class GRPOTrainer(Trainer):
             data_source=dataset,
             mini_repeat_count=self.num_generations,
             batch_size=self.args.generation_batch_size // self.num_generations,
-            repeat_count=self.num_iterations * self.args.steps_per_generation,
+            repeat_count=self.num_iterations * self.args.steps_per_generation,  # comment: why here * self.args.steps_per_generation?
             shuffle=self.shuffle_dataset,
             seed=self.args.seed,
         )
@@ -1435,9 +1436,9 @@ class GRPOTrainer(Trainer):
         has_videos = "video" in inputs[0]
         fps = self.video_fps
         max_frames = self.video_max_frames
-        # min_pixels = self.video_min_pixels,
-        # max_pixels = self.video_max_pixels,
-        # total_pixels = self.video_total_pixels
+        min_pixels = self.video_min_pixels,
+        max_pixels = self.video_max_pixels,
+        total_pixels = self.video_total_pixels
 
         if has_videos:
             videos = [example.get("video") for example in inputs]
@@ -1470,7 +1471,7 @@ class GRPOTrainer(Trainer):
         # print(f"self.processing_class: {self.processing_class}")
         with profiling_context(self, "LLM.process_vision_info"):
             images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
-            
+
         # print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
         
         kwargs['images'] = images
