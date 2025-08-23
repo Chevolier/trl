@@ -1685,50 +1685,51 @@ class GRPOTrainer(Trainer):
                     all_processed_videos = videos if has_videos else None
 
                 # Prepare vLLM inputs based on available modalities
-                if has_videos and all_videos:
-                    vllm_inputs = []
-                    
-                    # Get the original prompts (messages) for vLLM processing
-                    if self.vllm_tensor_parallel_size > 1:
-                        gathered_prompts_msgs = [None for _ in range(self.vllm_tensor_parallel_size)]
-                        torch.distributed.all_gather_object(gathered_prompts_msgs, prompts, group=self.tp_group)
-                        all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
+                with profiling_context(self, "vLLM.video_gathering"):
+                    if has_videos and all_videos:
+                        vllm_inputs = []
+                        
+                        # Get the original prompts (messages) for vLLM processing
+                        if self.vllm_tensor_parallel_size > 1:
+                            gathered_prompts_msgs = [None for _ in range(self.vllm_tensor_parallel_size)]
+                            torch.distributed.all_gather_object(gathered_prompts_msgs, prompts, group=self.tp_group)
+                            all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
+                        else:
+                            all_prompts_msgs = prompts
+                        # Reuse results from the first process_vision_info call to avoid redundant processing
+                        for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
+                            if video_path is not None and prompt_msgs is not None:
+                                # Use pre-computed results instead of calling process_vision_info again
+                                mm_data = {}
+                                if all_images is not None and i < len(all_images) and all_images[i] is not None:
+                                    mm_data["image"] = all_images[i]
+                                if all_processed_videos is not None and i < len(all_processed_videos) and all_processed_videos[i] is not None:
+                                    mm_data["video"] = all_processed_videos[i]
+                                
+                                # Extract individual video kwargs - use single FPS value for each video
+                                individual_video_kwargs = {}
+                                if 'video_fps' in video_kwargs and video_kwargs['video_fps']:
+                                    # Use the FPS for this specific video index, or default FPS if index out of range
+                                    fps_list = video_kwargs['video_fps']
+                                    individual_fps = fps_list[i] if i < len(fps_list) else self.video_fps
+                                    individual_video_kwargs['video_fps'] = individual_fps
+                                
+                                vllm_inputs.append({
+                                    "prompt": prompt_text,
+                                    "multi_modal_data": mm_data,
+                                    "mm_processor_kwargs": individual_video_kwargs,
+                                })
+                            else:
+                                vllm_inputs.append(prompt_text)
+                    elif has_images and all_images:
+                        vllm_inputs = []
+                        for prompt, image in zip(all_prompts_text, all_images):
+                            if image is not None:
+                                vllm_inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
+                            else:
+                                vllm_inputs.append(prompt)
                     else:
-                        all_prompts_msgs = prompts
-                    # Reuse results from the first process_vision_info call to avoid redundant processing
-                    for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
-                        if video_path is not None and prompt_msgs is not None:
-                            # Use pre-computed results instead of calling process_vision_info again
-                            mm_data = {}
-                            if all_images is not None and i < len(all_images) and all_images[i] is not None:
-                                mm_data["image"] = all_images[i]
-                            if all_processed_videos is not None and i < len(all_processed_videos) and all_processed_videos[i] is not None:
-                                mm_data["video"] = all_processed_videos[i]
-                            
-                            # Extract individual video kwargs - use single FPS value for each video
-                            individual_video_kwargs = {}
-                            if 'video_fps' in video_kwargs and video_kwargs['video_fps']:
-                                # Use the FPS for this specific video index, or default FPS if index out of range
-                                fps_list = video_kwargs['video_fps']
-                                individual_fps = fps_list[i] if i < len(fps_list) else self.video_fps
-                                individual_video_kwargs['video_fps'] = individual_fps
-                            
-                            vllm_inputs.append({
-                                "prompt": prompt_text,
-                                "multi_modal_data": mm_data,
-                                "mm_processor_kwargs": individual_video_kwargs,
-                            })
-                        else:
-                            vllm_inputs.append(prompt_text)
-                elif has_images and all_images:
-                    vllm_inputs = []
-                    for prompt, image in zip(all_prompts_text, all_images):
-                        if image is not None:
-                            vllm_inputs.append({"prompt": prompt, "multi_modal_data": {"image": image}})
-                        else:
-                            vllm_inputs.append(prompt)
-                else:
-                    vllm_inputs = all_prompts_text
+                        vllm_inputs = all_prompts_text
 
                 # print(f"vllm_inputs: len {len(vllm_inputs)}, multimodal video: {len(vllm_inputs[0]['multi_modal_data']['video'])}, {vllm_inputs[0]['multi_modal_data']['video'][0].shape}, {vllm_inputs}")
                 with profiling_context(self, "vLLM.generate"):
