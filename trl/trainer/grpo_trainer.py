@@ -1705,10 +1705,18 @@ class GRPOTrainer(Trainer):
                             if all_processed_videos is not None and i < len(all_processed_videos) and all_processed_videos[i] is not None:
                                 mm_data["video"] = all_processed_videos[i]
                             
+                            # Extract individual video kwargs - use single FPS value for each video
+                            individual_video_kwargs = {}
+                            if 'video_fps' in video_kwargs and video_kwargs['video_fps']:
+                                # Use the FPS for this specific video index, or default FPS if index out of range
+                                fps_list = video_kwargs['video_fps']
+                                individual_fps = fps_list[i] if i < len(fps_list) else self.video_fps
+                                individual_video_kwargs['video_fps'] = individual_fps
+                            
                             vllm_inputs.append({
                                 "prompt": prompt_text,
                                 "multi_modal_data": mm_data,
-                                "mm_processor_kwargs": video_kwargs,
+                                "mm_processor_kwargs": individual_video_kwargs,
                             })
                         else:
                             vllm_inputs.append(prompt_text)
