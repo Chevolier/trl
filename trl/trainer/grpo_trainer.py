@@ -1670,12 +1670,19 @@ class GRPOTrainer(Trainer):
                         gathered_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
                         torch.distributed.all_gather_object(gathered_videos, original_video_paths, group=self.tp_group)
                         all_videos = [vid for sublist in gathered_videos for vid in sublist]
+                        # Also gather processed video tensors for reuse
+                        gathered_processed_videos = [None for _ in range(self.vllm_tensor_parallel_size)]
+                        torch.distributed.all_gather_object(gathered_processed_videos, videos, group=self.tp_group)
+                        all_processed_videos = [vid for sublist in gathered_processed_videos for vid in sublist]
                     else:
                         all_videos = None
+                        all_processed_videos = None
                 else:
                     all_prompts_text = prompts_text
                     all_images = images if has_images else None
                     all_videos = original_video_paths if has_videos else None
+                    # Store processed video tensors for reuse
+                    all_processed_videos = videos if has_videos else None
 
                 # Prepare vLLM inputs based on available modalities
                 if has_videos and all_videos:
@@ -1688,23 +1695,23 @@ class GRPOTrainer(Trainer):
                         all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
                     else:
                         all_prompts_msgs = prompts
-                    with profiling_context(self, "vLLM.process_vision_info"):
-                        for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
-                            if video_path is not None and prompt_msgs is not None:
-                                image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
-                                mm_data = {}
-                                if image_inputs is not None:
-                                    mm_data["image"] = image_inputs
-                                if video_inputs is not None:
-                                    mm_data["video"] = video_inputs
-                                
-                                vllm_inputs.append({
-                                    "prompt": prompt_text,
-                                    "multi_modal_data": mm_data,
-                                    "mm_processor_kwargs": video_kwargs,
-                                })
-                            else:
-                                vllm_inputs.append(prompt_text)
+                    # Reuse results from the first process_vision_info call to avoid redundant processing
+                    for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
+                        if video_path is not None and prompt_msgs is not None:
+                            # Use pre-computed results instead of calling process_vision_info again
+                            mm_data = {}
+                            if all_images is not None and i < len(all_images) and all_images[i] is not None:
+                                mm_data["image"] = all_images[i]
+                            if all_processed_videos is not None and i < len(all_processed_videos) and all_processed_videos[i] is not None:
+                                mm_data["video"] = all_processed_videos[i]
+                            
+                            vllm_inputs.append({
+                                "prompt": prompt_text,
+                                "multi_modal_data": mm_data,
+                                "mm_processor_kwargs": video_kwargs,
+                            })
+                        else:
+                            vllm_inputs.append(prompt_text)
                 elif has_images and all_images:
                     vllm_inputs = []
                     for prompt, image in zip(all_prompts_text, all_images):
