@@ -1689,31 +1689,7 @@ class GRPOTrainer(Trainer):
                     
                     for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
                         if video_path is not None and prompt_msgs is not None:
-                            try:
-                                # Suppress ffmpeg/video processing errors
-                                import os
-                                original_stderr = os.dup(2)
-                                with open(os.devnull, 'w') as devnull:
-                                    os.dup2(devnull.fileno(), 2)
-                                
-                                # Process video using qwen_vl_utils following official vLLM guide
-                                image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
-                                
-                                # Restore stderr
-                                os.dup2(original_stderr, 2)
-                                os.close(original_stderr)
-                            except Exception as e:
-                                # Restore stderr in case of exception
-                                try:
-                                    os.dup2(original_stderr, 2)
-                                    os.close(original_stderr)
-                                except:
-                                    pass
-                                print(f"Warning: Skipping corrupted video {os.path.basename(video_path)}")
-                                # Skip this video and use text-only input
-                                vllm_inputs.append(prompt_text)
-                                continue
-                            
+                            image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
                             mm_data = {}
                             if image_inputs is not None:
                                 mm_data["image"] = image_inputs
