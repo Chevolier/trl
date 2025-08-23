@@ -32,7 +32,7 @@ deepspeed --num_gpus 8 --master_port 29517 examples/scripts/grpo_video.py \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.1 \
     --weight_decay 0.01 \
-    --logging_steps 1 \
+    --logging_steps 10 \
     --save_steps 50 \
     --overwrite_output_dir true \
     --bf16 true \
