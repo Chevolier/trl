@@ -1468,8 +1468,9 @@ class GRPOTrainer(Trainer):
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
 
         # print(f"self.processing_class: {self.processing_class}")
-
-        images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
+        with profiling_context(self, "LLM.process_vision_info"):
+            images, videos, video_kwargs = process_vision_info(prompts, return_video_kwargs=True)
+            
         # print(f"images: {images}\n\nvideos: {type(videos)}, {len(videos)}, {videos[0].shape}, {videos}\n\nvideo_args: {video_kwargs}")
         
         kwargs['images'] = images
@@ -1686,23 +1687,23 @@ class GRPOTrainer(Trainer):
                         all_prompts_msgs = [p for sublist in gathered_prompts_msgs for p in sublist]
                     else:
                         all_prompts_msgs = prompts
-                    
-                    for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
-                        if video_path is not None and prompt_msgs is not None:
-                            image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
-                            mm_data = {}
-                            if image_inputs is not None:
-                                mm_data["image"] = image_inputs
-                            if video_inputs is not None:
-                                mm_data["video"] = video_inputs
-                            
-                            vllm_inputs.append({
-                                "prompt": prompt_text,
-                                "multi_modal_data": mm_data,
-                                "mm_processor_kwargs": video_kwargs,
-                            })
-                        else:
-                            vllm_inputs.append(prompt_text)
+                    with profiling_context(self, "vLLM.process_vision_info"):
+                        for i, (prompt_text, video_path, prompt_msgs) in enumerate(zip(all_prompts_text, all_videos, all_prompts_msgs)):
+                            if video_path is not None and prompt_msgs is not None:
+                                image_inputs, video_inputs, video_kwargs = process_vision_info([prompt_msgs], return_video_kwargs=True)
+                                mm_data = {}
+                                if image_inputs is not None:
+                                    mm_data["image"] = image_inputs
+                                if video_inputs is not None:
+                                    mm_data["video"] = video_inputs
+                                
+                                vllm_inputs.append({
+                                    "prompt": prompt_text,
+                                    "multi_modal_data": mm_data,
+                                    "mm_processor_kwargs": video_kwargs,
+                                })
+                            else:
+                                vllm_inputs.append(prompt_text)
                 elif has_images and all_images:
                     vllm_inputs = []
                     for prompt, image in zip(all_prompts_text, all_images):
