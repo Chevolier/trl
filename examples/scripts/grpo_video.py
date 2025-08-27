@@ -230,8 +230,8 @@ def composite_reward(completions, field_weights=None, **kwargs):
     
     # Calculate composite rewards for each field
     field_rewards = []
-    bleu_weights = (0.3, 0.4, 0.3, 0.0)  # BLEU n-gram weights
-    smoother = SmoothingFunction()
+    # bleu_weights = (0.3, 0.4, 0.3, 0.0)  # BLEU n-gram weights
+    # smoother = SmoothingFunction()
     
     for field in ["description", "actions", "objects", "characteristics", "title"]:
         # 1. Sentence embedding similarity (50% weight)
@@ -240,28 +240,29 @@ def composite_reward(completions, field_weights=None, **kwargs):
         cosine_scores = util.cos_sim(embeddings_pred, embeddings_ref)
         embedding_rewards = [float(cosine_scores[i][i]) for i in range(len(pred_fields[field]))]
         
-        # 2. BLEU score similarity (50% weight)
-        bleu_rewards = []
-        for pred_text, ref_text in zip(pred_fields[field], ans_fields[field]):
-            if pred_text and ref_text:  # Only calculate if both texts exist
-                try:
-                    reference_tokens = nltk.word_tokenize(ref_text)
-                    candidate_tokens = nltk.word_tokenize(pred_text)
-                    bleu_score = sentence_bleu([reference_tokens], candidate_tokens, 
-                                             weights=bleu_weights, 
-                                             smoothing_function=smoother.method4)
-                    bleu_rewards.append(bleu_score)
-                except:
-                    bleu_rewards.append(0.0)
-            else:
-                bleu_rewards.append(0.0)
+        # # 2. BLEU score similarity (50% weight)
+        # bleu_rewards = []
+        # for pred_text, ref_text in zip(pred_fields[field], ans_fields[field]):
+        #     if pred_text and ref_text:  # Only calculate if both texts exist
+        #         try:
+        #             reference_tokens = nltk.word_tokenize(ref_text)
+        #             candidate_tokens = nltk.word_tokenize(pred_text)
+        #             bleu_score = sentence_bleu([reference_tokens], candidate_tokens, 
+        #                                      weights=bleu_weights, 
+        #                                      smoothing_function=smoother.method4)
+        #             bleu_rewards.append(bleu_score)
+        #         except:
+        #             bleu_rewards.append(0.0)
+        #     else:
+        #         bleu_rewards.append(0.0)
         
-        # Combine embedding and BLEU scores (50% each)
-        composite_field_rewards = []
-        for emb_reward, bleu_reward in zip(embedding_rewards, bleu_rewards):
-            composite_reward = 0.5 * emb_reward + 0.5 * bleu_reward
-            composite_field_rewards.append(composite_reward)
+        # # Combine embedding and BLEU scores (50% each)
+        # composite_field_rewards = []
+        # for emb_reward, bleu_reward in zip(embedding_rewards, bleu_rewards):
+        #     composite_reward = 0.5 * emb_reward + 0.5 * bleu_reward
+        #     composite_field_rewards.append(composite_reward)
         
+        composite_field_rewards = embedding_rewards
         field_rewards.append(composite_field_rewards)
     
     # Calculate final weighted average across all fields

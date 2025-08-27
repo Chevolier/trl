@@ -200,6 +200,7 @@ pip install uv
 uv pip install flash-attn --no-build-isolation
 
 nohup bash scripts/run_grpo_video.sh >logs/train.out 2>&1 &
+nohup bash scripts/run_grpo_video.sh >logs/train_emd_reward.out 2>&1 &
 ```
 
 ## Citation
